@@ -5535,6 +5535,15 @@ function renderSkills(skills) {
       const el = document.createElement('div');
       el.className = 'skill-item' + (skill.disabled ? ' disabled' : '');
       el.style.display = collapsed ? 'none' : '';
+      if (skill.protected) {
+        el.classList.add('protected');
+        const nameOnly = document.createElement('span');
+        nameOnly.className = 'skill-name';
+        nameOnly.textContent = skill.name;
+        el.append(nameOnly);
+        sec.appendChild(el);
+        continue;
+      }
       const isDisabled = skill.disabled || false;
       const toggle = document.createElement('span');
       toggle.className = 'skill-toggle' + (isDisabled ? '' : ' enabled');

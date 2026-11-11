@@ -12594,6 +12594,22 @@ def _tool_result_snippet(raw, limit: int = _TOOL_RESULT_SNIPPET_MAX) -> str:
     return text[:limit]
 
 
+def _withhold_tool_result(name, args, result, profile=None):
+    """Apply the profile's tool-result policy before a result reaches the browser."""
+    from api.helpers import tool_result_redactor
+
+    hermes_home = None
+    if profile:
+        try:
+            from api.profiles import get_hermes_home_for_profile
+
+            hermes_home = get_hermes_home_for_profile(profile)
+        except Exception:
+            hermes_home = None
+    redact = tool_result_redactor(hermes_home)
+    return redact(name, result, args) if redact is not None else result
+
+
 def _truncate_tool_args(args, limit: int = 6) -> dict:
     """Truncate tool args for compact session persistence.
 
@@ -15602,7 +15618,9 @@ def _run_agent_streaming(
                     put('tool_complete', {
                         'event_type': event_type,
                         'name': name,
-                        'preview': preview,
+                        'preview': _withhold_tool_result(
+                            name, args, preview, getattr(s, 'profile', None)
+                        ),
                         'args': args_snap,
                         'duration': cb_kwargs.get('duration'),
                         'is_error': bool(cb_kwargs.get('is_error', False)),
@@ -15684,7 +15702,9 @@ def _run_agent_streaming(
                     _record_live_tool_complete(tool_call_id, name, function_result)
                     if tool_call_id and tool_call_id not in _live_tool_event_complete_ids:
                         _live_tool_event_complete_ids.add(tool_call_id)
-                        result_snippet = _tool_result_snippet(function_result)
+                        result_snippet = _tool_result_snippet(_withhold_tool_result(
+                            name, args, function_result, getattr(s, 'profile', None)
+                        ))
                         for live_tc in reversed(_live_tool_calls):
                             if live_tc.get('done'):
                                 continue

@@ -1340,6 +1340,33 @@ def uploads_disabled(config_data: dict | None = None) -> bool:
     return _webui_policy_flag("HERMES_WEBUI_DISABLE_UPLOADS", "disable_uploads", config_data)
 
 
+def protected_skill_dirs(config_data: dict | None = None) -> list[Path]:
+    """``HERMES_WEBUI_PROTECTED_SKILL_DIRS`` (os.pathsep-separated) / ``webui.protected_skill_dirs``.
+
+    Skills under these folders are listed by name only; their content cannot be
+    viewed, edited, deleted or toggled through WebUI.
+    """
+    raw = _webui_policy_raw(
+        "HERMES_WEBUI_PROTECTED_SKILL_DIRS", "protected_skill_dirs", config_data
+    )
+    if isinstance(raw, str):
+        items = raw.split(os.pathsep)
+    elif isinstance(raw, (list, tuple)):
+        items = [str(item) for item in raw if item is not None]
+    else:
+        items = []
+    dirs: list[Path] = []
+    for item in items:
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            dirs.append(Path(item).expanduser().resolve())
+        except (OSError, RuntimeError):
+            dirs.append(Path(item).expanduser().absolute())
+    return dirs
+
+
 # ── File type maps ───────────────────────────────────────────────────────────
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp"}
 MD_EXTS = {".md", ".markdown", ".mdown"}

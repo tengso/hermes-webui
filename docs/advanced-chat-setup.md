@@ -281,11 +281,18 @@ also be set with an environment variable; a non-empty variable wins over
 ```yaml
 webui:
   disable_uploads: true
+  protected_skill_dirs:
+    - /opt/shared/skills/internal
 ```
 
 | Key | Variable | Effect |
 |---|---|---|
 | `disable_uploads` | `HERMES_WEBUI_DISABLE_UPLOADS` | Every upload endpoint (`/api/upload`, `/api/upload/extract`, `/api/workspace/upload`, `/api/transcribe`) answers 403 before reading the body. The attach, mic, voice-mode and workspace upload controls are hidden, and pasted or dropped files are ignored. Long pasted text stays in the composer. |
+| `protected_skill_dirs` | `HERMES_WEBUI_PROTECTED_SKILL_DIRS` (`os.pathsep`-separated) | Skills under these folders appear by name only. Their content and linked files cannot be opened, and they cannot be edited, deleted, toggled or shadowed by a new skill of the same name from WebUI. `/use <skill>` and slash commands still work: the agent loads the skill itself. When it does, the browser only sees the `skill_view` status (`{"success": true, "name": ..., "status": "succeeded"}`) in tool cards, session payloads, exports and content search; failures keep their error text. The agent still receives the full content. |
+
+These are WebUI controls. `protected_skill_dirs` does not stop the agent from
+reading a skill with its own tools, and it does not make the files read-only;
+mount the folder read-only for that.
 
 ## Gateway-backed browser chat
 

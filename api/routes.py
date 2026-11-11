@@ -1434,6 +1434,88 @@ def _active_skill_search_dirs(skills_dir: Path) -> list[Path]:
     return [p for p in dirs if p.exists()]
 
 
+_PROTECTED_SKILL_ERROR = "This skill is protected; its content cannot be viewed or changed in WebUI."
+
+
+def _policy_config_for_profile(hermes_home=None):
+    """A profile's config.yaml for deployment-policy reads; None falls back to ``get_config()``.
+
+    ``hermes_home`` names the profile explicitly; the default is the request's active profile.
+    """
+    config_path = Path(hermes_home) / "config.yaml" if hermes_home else _active_profile_config_path()
+    if not config_path.exists():
+        return {}
+    try:
+        cfg = _load_yaml_config_file(config_path)
+    except Exception:
+        return None
+    return cfg if isinstance(cfg, dict) else None
+
+
+def _protected_skill_dirs_for_profile(hermes_home=None) -> list[Path]:
+    """Protected skill folders for a profile (env var first, then its config.yaml)."""
+    from api.config import protected_skill_dirs
+
+    return protected_skill_dirs(_policy_config_for_profile(hermes_home))
+
+
+def _skill_path_is_protected(path, protected_dirs: list[Path]) -> bool:
+    if not protected_dirs or path is None:
+        return False
+    try:
+        resolved = Path(path).resolve()
+    except (OSError, RuntimeError):
+        return True
+    return any(resolved == root or resolved.is_relative_to(root) for root in protected_dirs)
+
+
+def tool_result_redactor(hermes_home=None):
+    """Return ``redact(tool_name, result, args=None)`` for browser-facing tool results, or None.
+
+    A ``skill_view`` result for a protected skill is replaced by its status only. An
+    unparseable result whose skill cannot be identified is withheld as well.
+    """
+    from api.config import protected_skill_dirs
+
+    cfg = _policy_config_for_profile(hermes_home)
+    protected_dirs = protected_skill_dirs(cfg)
+    if not protected_dirs:
+        return None
+    skills_dir = Path(hermes_home) / "skills" if hermes_home else _active_skills_dir()
+    search_dirs = _active_skill_search_dirs(skills_dir)
+    verdicts: dict[str, bool] = {}
+
+    def _name_is_protected(name: str) -> bool:
+        if not name:
+            return True
+        if name not in verdicts:
+            _skill_dir, skill_md = _find_skill_in_dirs(name, search_dirs)
+            verdicts[name] = _skill_path_is_protected(skill_md, protected_dirs)
+        return verdicts[name]
+
+    def redact(tool_name, result, args=None):
+        if tool_name != "skill_view":
+            return result
+        data = result
+        if isinstance(result, str):
+            try:
+                data = json.loads(result)
+            except (TypeError, ValueError):
+                data = None
+        if isinstance(data, dict) and data.get("success") is not True:
+            return result
+        name = args.get("name") if isinstance(args, dict) else None
+        if not name and isinstance(data, dict):
+            name = data.get("name")
+        name = str(name or "").strip()
+        skill_dir = data.get("skill_dir") if isinstance(data, dict) else None
+        if not _name_is_protected(name) and not _skill_path_is_protected(skill_dir, protected_dirs):
+            return result
+        return json.dumps({"success": True, "name": name, "status": "succeeded"}, ensure_ascii=False)
+
+    return redact
+
+
 def _worktree_retained_payload(session) -> dict:
     """Return explicit no-cleanup metadata for worktree-backed session actions."""
     worktree_path = getattr(session, "worktree_path", None) if session else None
@@ -1611,6 +1693,7 @@ def _skills_list_from_dir(skills_dir: Path, category: str | None = None) -> dict
     seen_names: set[str] = set()
     disabled = _get_disabled_skill_names_for_profile()
     search_dirs = _active_skill_search_dirs(skills_dir)
+    protected_dirs = _protected_skill_dirs_for_profile()
 
     for scan_dir in search_dirs:
         for skill_md in iter_skill_index_files(scan_dir, "SKILL.md"):
@@ -1635,16 +1718,17 @@ def _skills_list_from_dir(skills_dir: Path, category: str | None = None) -> dict
                 if len(description) > MAX_DESCRIPTION_LENGTH:
                     description = description[: MAX_DESCRIPTION_LENGTH - 3] + "..."
                 seen_names.add(name)
-                all_skills.append(
-                    {
-                        "name": name,
-                        "description": description,
-                        "category": _skill_category_from_path(
-                            skill_md, search_dirs, local_skills_dir=skills_dir
-                        ),
-                        "disabled": name in disabled,
-                    }
-                )
+                entry = {
+                    "name": name,
+                    "description": description,
+                    "category": _skill_category_from_path(
+                        skill_md, search_dirs, local_skills_dir=skills_dir
+                    ),
+                    "disabled": name in disabled,
+                }
+                if _skill_path_is_protected(skill_md, protected_dirs):
+                    entry.update({"description": "", "category": None, "protected": True})
+                all_skills.append(entry)
             except (UnicodeDecodeError, PermissionError) as e:
                 logger.debug("Failed to read skill file %s: %s", skill_md, e)
             except Exception as e:
@@ -19343,6 +19427,8 @@ def handle_get(handler, parsed) -> bool:
             )
             if not skill_dir:
                 return bad(handler, "Skill not found", 404)
+            if _skill_path_is_protected(skill_dir, _protected_skill_dirs_for_profile()):
+                return bad(handler, _PROTECTED_SKILL_ERROR, 403)
             target = (skill_dir / file_path).resolve()
             try:
                 target.relative_to(skill_dir.resolve())
@@ -19354,6 +19440,13 @@ def handle_get(handler, parsed) -> bool:
                 handler,
                 {"content": target.read_text(encoding="utf-8"), "path": file_path},
             )
+        protected_dirs = _protected_skill_dirs_for_profile()
+        if protected_dirs:
+            _skill_dir, skill_md = _find_skill_in_dirs(
+                name, _active_skill_search_dirs(_active_skills_dir())
+            )
+            if _skill_path_is_protected(skill_md, protected_dirs):
+                return bad(handler, _PROTECTED_SKILL_ERROR, 403)
         session_id = qs.get("session_id", [""])[0]
         skill_usage_generation = (
             _capture_session_skill_usage_generation(session_id, handler)
@@ -24232,6 +24325,7 @@ def _handle_sessions_search(handler, parsed):
             "active_profile": active_profile,
         })
     results = []
+    tool_redactors: dict[str, object] = {}
     for s in sessions:
         title_match = q in (s.get("title") or "").lower()
         if title_match:
@@ -24250,13 +24344,29 @@ def _handle_sessions_search(handler, parsed):
                 sess = get_session_for_scan(s["session_id"])
                 if sess is None:
                     continue
+                from api.helpers import (
+                    _session_profile_home,
+                    _withhold_tool_result_messages,
+                    tool_result_redactor,
+                )
+
+                scan_profile = str(s.get("profile") or "")
+                if scan_profile not in tool_redactors:
+                    tool_redactors[scan_profile] = tool_result_redactor(
+                        _session_profile_home({"profile": scan_profile})
+                    )
+                scan_messages = sess.messages or []
+                if tool_redactors[scan_profile] is not None:
+                    scan_messages = _withhold_tool_result_messages(
+                        scan_messages, tool_redactors[scan_profile]
+                    )
                 # Hidden internal rows neither match nor consume the search
                 # depth budget (#quiet-delegation gate review). Each row keeps
                 # its RAW index into the full sess.messages list (hidden rows
                 # included, as they are in the /api/session payload) so a
                 # content hit can tell the frontend where it matched (#4159).
                 scan_pool = [
-                    (raw_idx, m) for raw_idx, m in enumerate(sess.messages or [])
+                    (raw_idx, m) for raw_idx, m in enumerate(scan_messages)
                     if not is_hidden_transcript_row(m)
                 ]
                 msgs = scan_pool[:depth] if depth else scan_pool
@@ -36611,6 +36721,15 @@ def _handle_skill_save(handler, body):
         skill_dir.resolve().relative_to(skills_dir.resolve())
     except ValueError:
         return bad(handler, "Invalid skill path")
+    protected_dirs = _protected_skill_dirs_for_profile()
+    if protected_dirs:
+        _existing_dir, existing_md = _find_skill_in_dirs(
+            skill_name, _active_skill_search_dirs(skills_dir)
+        )
+        if _skill_path_is_protected(skill_dir, protected_dirs) or _skill_path_is_protected(
+            existing_md, protected_dirs
+        ):
+            return bad(handler, _PROTECTED_SKILL_ERROR, 403)
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_file = skill_dir / "SKILL.md"
     if skill_file.is_symlink():
@@ -36635,6 +36754,8 @@ def _handle_skill_delete(handler, body):
     if not matches:
         return bad(handler, "Skill not found", 404)
     skill_dir = matches[0].parent
+    if _skill_path_is_protected(skill_dir, _protected_skill_dirs_for_profile()):
+        return bad(handler, _PROTECTED_SKILL_ERROR, 403)
     shutil.rmtree(str(skill_dir))
     invalidate_profile_skills_stats()
     return j(handler, {"ok": True, "name": body["name"]})
@@ -36714,6 +36835,8 @@ def _handle_skill_toggle(handler, body):
     skill_dir, skill_md = _find_skill_in_dirs(name, search_dirs)
     if not skill_md:
         return bad(handler, f"Skill '{name}' not found", 404)
+    if _skill_path_is_protected(skill_md, _protected_skill_dirs_for_profile()):
+        return bad(handler, _PROTECTED_SKILL_ERROR, 403)
 
     config_path = _active_profile_config_path()
     resolved_refs: list[str] = []

@@ -1520,6 +1520,16 @@ async function cmdUse(args){
       }
       return;
     }
+    if(match.protected){
+      const directive = `[USER OVERRIDE] You MUST load the skill '${match.name}' with the skill_view tool and follow it before responding to the next message.`;
+      resolve({name:match.name,directive,content:''});
+      if(isCurrentSession()){
+        S.messages.push({role:'assistant', content:`Next turn: skill \`${match.name}\` will be forced.`});
+        renderMessages();
+      }
+      showToast(`Skill \`${match.name}\` will be used for next turn.`);
+      return;
+    }
     // Existing canonical request shape: api(`/api/skills/content?name=${encodeURIComponent(match.name)}`)
     const detail = await api(`/api/skills/content?name=${encodeURIComponent(match.name)}${pending.sessionId?`&session_id=${encodeURIComponent(pending.sessionId)}`:''}`);
     const skillContent = detail&&typeof detail.content==='string' ? detail.content.trim() : '';

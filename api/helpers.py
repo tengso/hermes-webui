@@ -2030,12 +2030,174 @@ def _copy_json_value(value):
     return value
 
 
+def tool_result_redactor(hermes_home=None):
+    """A profile's browser-facing tool-result redactor, or None when no policy applies."""
+    try:
+        from api.routes import tool_result_redactor as _profile_tool_result_redactor
+
+        return _profile_tool_result_redactor(hermes_home)
+    except Exception:
+        logger.warning("Tool result policy unavailable; withholding every tool result", exc_info=True)
+        return lambda tool_name, result, args=None: _json.dumps({"success": True, "status": "succeeded"})
+
+
+def _session_profile_home(session_dict: dict):
+    """The Hermes home of the session's own profile, or None for the request's active profile."""
+    profile = session_dict.get("profile")
+    if not isinstance(profile, str) or not profile.strip():
+        return None
+    try:
+        from api.profiles import get_hermes_home_for_profile
+
+        return get_hermes_home_for_profile(profile)
+    except Exception:
+        return None
+
+
+def _tool_call_index(messages) -> dict:
+    """Map tool-call ids to ``(tool_name, args)`` from the assistant turns that issued them."""
+    calls = {}
+    for message in messages:
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        for tool_call in message.get("tool_calls") or []:
+            if not isinstance(tool_call, dict):
+                continue
+            tid = tool_call.get("id") or tool_call.get("call_id")
+            function = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
+            if not tid:
+                continue
+            try:
+                args = _json.loads(function.get("arguments") or "{}")
+            except (TypeError, ValueError):
+                args = {}
+            calls[tid] = (function.get("name") or tool_call.get("name"), args if isinstance(args, dict) else {})
+        content = message.get("content")
+        for part in content if isinstance(content, list) else []:
+            if isinstance(part, dict) and part.get("type") == "tool_use" and part.get("id"):
+                args = part.get("input")
+                calls[part["id"]] = (part.get("name"), args if isinstance(args, dict) else {})
+    return calls
+
+
+def _looks_like_skill_view_result(raw) -> bool:
+    """Recognise a skill_view result whose issuing tool call is not in the same window."""
+    try:
+        data = _json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return False
+    return (
+        isinstance(data, dict)
+        and "content" in data
+        and "name" in data
+        and ("skill_dir" in data or "file" in data)
+    )
+
+
+_TOOL_RESULT_KEYS = ("snippet", "result", "output", "preview")
+
+
+def _withhold_tool_record(record, redact, name=None, args=None):
+    """Copy a tool-call summary dict with each result-bearing string field redacted."""
+    record = dict(record)
+    name = name or record.get("name")
+    args = args if args is not None else record.get("args")
+    for key in _TOOL_RESULT_KEYS:
+        if isinstance(record.get(key), str):
+            record[key] = redact(name, record[key], args)
+    return record
+
+
+def _withhold_scene_tool_rows(scene, redact):
+    rows = scene.get("activity_rows")
+    if not isinstance(rows, list):
+        return scene
+    out = []
+    for row in rows:
+        if isinstance(row, dict) and row.get("role") == "tool":
+            row = dict(row)
+            tool = row.get("tool") if isinstance(row.get("tool"), dict) else {}
+            payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+            name = tool.get("name") or payload.get("name")
+            args = tool.get("args") if isinstance(tool.get("args"), dict) else payload.get("args")
+            if tool:
+                row["tool"] = _withhold_tool_record(tool, redact, name, args)
+            if payload:
+                row["payload"] = _withhold_tool_record(payload, redact, name, args)
+        out.append(row)
+    return {**scene, "activity_rows": out}
+
+
+def _withhold_tool_result_messages(messages, redact):
+    calls = _tool_call_index(messages)
+    result = []
+    for message in messages:
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            if isinstance(message.get("_anchor_activity_scene"), dict):
+                message = {
+                    **message,
+                    "_anchor_activity_scene": _withhold_scene_tool_rows(message["_anchor_activity_scene"], redact),
+                }
+            if isinstance(message.get("_partial_tool_calls"), list):
+                message = {
+                    **message,
+                    "_partial_tool_calls": _withhold_tool_records(message["_partial_tool_calls"], redact),
+                }
+        if isinstance(message, dict) and message.get("role") == "tool":
+            tid = message.get("tool_call_id") or message.get("tool_use_id") or ""
+            name, args = calls.get(tid, (None, {}))
+            content = message.get("content")
+            if isinstance(content, str):
+                name = name or message.get("name")
+                if not name and _looks_like_skill_view_result(content):
+                    name = "skill_view"
+                message = {**message, "content": redact(name, content, args)}
+        elif isinstance(message, dict) and isinstance(message.get("content"), list):
+            parts = []
+            for part in message["content"]:
+                if isinstance(part, dict) and part.get("type") == "tool_result":
+                    name, args = calls.get(part.get("tool_use_id") or "", (None, {}))
+                    raw = part.get("content")
+                    if isinstance(raw, list):
+                        raw = "".join(c.get("text", "") for c in raw if isinstance(c, dict))
+                    redacted = redact(name, raw, args)
+                    if redacted is not raw:
+                        part = {**part, "content": redacted}
+                parts.append(part)
+            message = {**message, "content": parts}
+        result.append(message)
+    return result
+
+
+def _withhold_tool_records(tool_calls, redact):
+    return [
+        _withhold_tool_record(tool_call, redact) if isinstance(tool_call, dict) else tool_call
+        for tool_call in tool_calls
+    ]
+
+
+def withhold_tool_results(session_dict: dict, redact) -> dict:
+    """Return a shallow copy whose transcript fields carry only the tool results policy allows."""
+    result = dict(session_dict)
+    for key, value in session_dict.items():
+        if key in {"messages", "context_messages"} and isinstance(value, list):
+            result[key] = _withhold_tool_result_messages(value, redact)
+        elif key == "tool_calls" and isinstance(value, list):
+            result[key] = _withhold_tool_records(value, redact)
+        elif key == "runtime_journal_snapshot" and isinstance(value, dict):
+            result[key] = withhold_tool_results(value, redact)
+    return result
+
+
 def redact_session_data(session_dict: dict) -> dict:
     """Redact credentials in the public session response without mutation."""
     from api.config import load_settings
     _enabled = bool(load_settings().get("api_redact_enabled", True))
     if not isinstance(session_dict, dict):
         return {}
+    _tool_redact = tool_result_redactor(_session_profile_home(session_dict))
+    if _tool_redact is not None:
+        session_dict = withhold_tool_results(session_dict, _tool_redact)
     result = {}
     from api.process_event_utils import build_active_turn_token
     _active_turn_token = build_active_turn_token(session_dict.get("active_stream_id"), session_dict.get("pending_started_at"))
