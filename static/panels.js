@@ -8297,7 +8297,7 @@ const wrap=$('composerWrap');let dragCounter=0;
 document.addEventListener('dragover',e=>e.preventDefault());
 document.addEventListener('dragenter',e=>{e.preventDefault();
   const isWsPath=e.dataTransfer.types.includes('application/ws-path');
-  const isFiles=e.dataTransfer.types.includes('Files');
+  const isFiles=window._uploadsDisabled!==true&&e.dataTransfer.types.includes('Files');
   if(isFiles||isWsPath){
     dragCounter++;
     // Context-aware hint: a workspace-file drag inserts an @path reference;

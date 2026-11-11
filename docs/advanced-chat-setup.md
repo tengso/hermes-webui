@@ -272,6 +272,21 @@ off by default. When it is on, the ID is the last line of the system text
 (`- Session ID: <id>`), so everything before it is still the same across
 chats.
 
+## Deployment policy
+
+The `webui:` keys below let an administrator restrict a deployment. Each one can
+also be set with an environment variable; a non-empty variable wins over
+`config.yaml`.
+
+```yaml
+webui:
+  disable_uploads: true
+```
+
+| Key | Variable | Effect |
+|---|---|---|
+| `disable_uploads` | `HERMES_WEBUI_DISABLE_UPLOADS` | Every upload endpoint (`/api/upload`, `/api/upload/extract`, `/api/workspace/upload`, `/api/transcribe`) answers 403 before reading the body. The attach, mic, voice-mode and workspace upload controls are hidden, and pasted or dropped files are ignored. Long pasted text stays in the composer. |
+
 ## Gateway-backed browser chat
 
 By default, browser chat runs through WebUI's in-process legacy runtime. Advanced

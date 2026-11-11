@@ -117,3 +117,45 @@ const items=names.map(name=>({kind:'file',webkitGetAsEntry(){acquired.push(name)
         ["alpha.txt", "beta.txt", "gamma.txt"],
         [["inside.txt", "nested/"]], ["fallback.txt"],
     ]
+
+
+def _extract_js_function(source_text, function_name):
+    start = source_text.index(f"function {function_name}(")
+    depth = 0
+    for index in range(source_text.index("{", start), len(source_text)):
+        if source_text[index] == "{":
+            depth += 1
+        elif source_text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source_text[start : index + 1]
+    raise AssertionError(f"Could not extract {function_name}")
+
+
+def test_disabled_uploads_ignore_os_files_and_pending_queue_node():
+    node = shutil.which("node")
+    if not node:
+        return
+    js = "\n".join([
+        "global.window = {};",
+        "global.S = { pendingFiles: [] };",
+        "global.MAX_UPLOAD_BYTES = 1000;",
+        "let rendered = 0; global.renderTray = () => { rendered++; };",
+        _extract_js_function(WORKSPACE_JS, "_isOsFilesDrag"),
+        _extract_js_function(UI_JS, "addFiles"),
+        "const drag = { dataTransfer: { types: ['Files'] } };",
+        "const file = { name: 'a.txt', size: 1, lastModified: 1 };",
+        "window._uploadsDisabled = true;",
+        "const disabled = { drag: _isOsFilesDrag(drag) };",
+        "addFiles([file]);",
+        "disabled.pending = S.pendingFiles.length; disabled.rendered = rendered;",
+        "window._uploadsDisabled = false;",
+        "const enabled = { drag: _isOsFilesDrag(drag) };",
+        "addFiles([file]);",
+        "enabled.pending = S.pendingFiles.length;",
+        "console.log(JSON.stringify({ disabled, enabled }));",
+    ])
+    out = subprocess.run([node, "-e", js], capture_output=True, text=True, check=True)
+    result = json.loads(out.stdout)
+    assert result["disabled"] == {"drag": False, "pending": 0, "rendered": 0}
+    assert result["enabled"] == {"drag": True, "pending": 1}

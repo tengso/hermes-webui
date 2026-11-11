@@ -27723,6 +27723,7 @@ function _pendingFileUniqueName(name){
 // A pending file's identity is its ORIGINAL name (before any collision rename).
 function _pendingFileOrigName(p){return (p&&p._origName)||(p&&p.name);}
 function addFiles(files){
+  if(typeof window!=='undefined'&&window._uploadsDisabled===true)return;
   for(const f of files){
     if(f&&f.size>MAX_UPLOAD_BYTES){_showUploadTooLarge(f);continue;}
     // True duplicate: same original name, size and mtime as ANY pending file,

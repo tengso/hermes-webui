@@ -18576,6 +18576,8 @@ def handle_get(handler, parsed) -> bool:
         settings["password_env_var"] = bool(
             os.getenv("HERMES_WEBUI_PASSWORD", "").strip()
         )
+        from api.config import uploads_disabled as _uploads_disabled
+        settings["uploads_disabled"] = _uploads_disabled()
         # Auth-state fields for frontend safety badge / confirmation flows
         from api.auth import get_password_hash, is_auth_enabled
         settings["auth_enabled"] = is_auth_enabled()

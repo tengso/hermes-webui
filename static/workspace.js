@@ -1792,6 +1792,7 @@ async function copyPreviewRelativePath(){
 
 // ── Workspace upload ──────────────────────────────────────────────────
 function triggerWorkspaceUpload() {
+  if (typeof window !== 'undefined' && window._uploadsDisabled === true) return;
   if(_workspacePathIsReadOnly(S.currentDir || '.')){
     showToast(t('external_link_read_only'), 2000);
     return;
@@ -1811,7 +1812,7 @@ function triggerWorkspaceUpload() {
 }
 
 async function uploadToWorkspace(file, dir) {
-  if (!S.session) return;
+  if (!S.session || (typeof window !== 'undefined' && window._uploadsDisabled === true)) return;
   if(_workspacePathIsReadOnly(dir || '.')){
     showToast(t('external_link_read_only'), 2000);
     return;
@@ -1847,6 +1848,7 @@ async function uploadToWorkspace(file, dir) {
 }
 
 function _isOsFilesDrag(e) {
+  if (typeof window !== 'undefined' && window._uploadsDisabled === true) return false;
   return !!(e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('Files'));
 }
 
@@ -1918,7 +1920,7 @@ async function _collectOsDropUploads(dataTransfer) {
 }
 
 async function uploadOsDropToWorkspace(dataTransfer, destDir) {
-  if (!S.session || !dataTransfer) return;
+  if (!S.session || !dataTransfer || (typeof window !== 'undefined' && window._uploadsDisabled === true)) return;
   if(_workspacePathIsReadOnly(destDir || '.')){
     showToast(t('external_link_read_only'), 2000);
     return;
@@ -1981,13 +1983,13 @@ if (typeof document !== 'undefined') {
     const tree = $('fileTree');
     if (!tree) return;
     tree.addEventListener('dragenter', (e) => {
-      if (e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('Files')) {
+      if (_isOsFilesDrag(e)) {
         e.preventDefault();
         e.stopPropagation();
       }
     });
     tree.addEventListener('dragover', (e) => {
-      if (e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('Files')) {
+      if (_isOsFilesDrag(e)) {
         e.preventDefault();
         e.stopPropagation();
         if (e.target.closest('.file-item[data-ws-type="dir"],.file-item[data-ws-is-dir="true"],.breadcrumb-seg')) return;
@@ -2001,7 +2003,7 @@ if (typeof document !== 'undefined') {
     });
     tree.addEventListener('drop', async (e) => {
       tree.classList.remove('drag-over-upload');
-      if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return;
+      if (!_isOsFilesDrag(e)) return;
       if (e.target.closest('.file-item[data-ws-type="dir"],.file-item[data-ws-is-dir="true"],.breadcrumb-seg')) return;
       e.preventDefault();
       e.stopPropagation();

@@ -1313,6 +1313,33 @@ def verify_hermes_imports() -> tuple:
 MAX_FILE_BYTES = 400_000
 MAX_UPLOAD_BYTES = _env_mb_bytes("HERMES_WEBUI_MAX_UPLOAD_MB", 20)
 
+
+# ── Deployment policy (env var wins over config.yaml ``webui:``) ─────────────
+def _webui_policy_raw(env_name: str, key: str, config_data: dict | None = None):
+    env_value = os.getenv(env_name, "")
+    if env_value.strip():
+        return env_value
+    if config_data is None:
+        try:
+            config_data = get_config()
+        except Exception:
+            config_data = {}
+    webui_cfg = config_data.get("webui") if isinstance(config_data, dict) else None
+    return webui_cfg.get(key) if isinstance(webui_cfg, dict) else None
+
+
+def _webui_policy_flag(env_name: str, key: str, config_data: dict | None = None) -> bool:
+    raw = _webui_policy_raw(env_name, key, config_data)
+    if isinstance(raw, bool):
+        return raw
+    return str(raw or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def uploads_disabled(config_data: dict | None = None) -> bool:
+    """``HERMES_WEBUI_DISABLE_UPLOADS`` / ``webui.disable_uploads``: refuse every file upload."""
+    return _webui_policy_flag("HERMES_WEBUI_DISABLE_UPLOADS", "disable_uploads", config_data)
+
+
 # ── File type maps ───────────────────────────────────────────────────────────
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp"}
 MD_EXTS = {".md", ".markdown", ".mdown"}
