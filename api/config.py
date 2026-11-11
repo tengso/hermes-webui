@@ -1340,6 +1340,11 @@ def uploads_disabled(config_data: dict | None = None) -> bool:
     return _webui_policy_flag("HERMES_WEBUI_DISABLE_UPLOADS", "disable_uploads", config_data)
 
 
+def tool_results_hidden(config_data: dict | None = None) -> bool:
+    """``HERMES_WEBUI_HIDE_TOOL_RESULTS`` / ``webui.hide_tool_results``: browser sees tool status only."""
+    return _webui_policy_flag("HERMES_WEBUI_HIDE_TOOL_RESULTS", "hide_tool_results", config_data)
+
+
 def protected_skill_dirs(config_data: dict | None = None) -> list[Path]:
     """``HERMES_WEBUI_PROTECTED_SKILL_DIRS`` (os.pathsep-separated) / ``webui.protected_skill_dirs``.
 

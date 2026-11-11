@@ -1459,6 +1459,25 @@ def _protected_skill_dirs_for_profile(hermes_home=None) -> list[Path]:
     return protected_skill_dirs(_policy_config_for_profile(hermes_home))
 
 
+def _tool_result_status(result) -> str:
+    """Status-only replacement for a tool result shown in the browser."""
+    data = result
+    if isinstance(result, str):
+        try:
+            data = json.loads(result)
+        except (TypeError, ValueError):
+            data = None
+    failed = isinstance(data, dict) and (
+        data.get("success") is False
+        or bool(data.get("error"))
+        or data.get("exit_code") not in (None, 0)
+    )
+    return json.dumps(
+        {"success": not failed, "status": "failed" if failed else "succeeded"},
+        ensure_ascii=False,
+    )
+
+
 def _skill_path_is_protected(path, protected_dirs: list[Path]) -> bool:
     if not protected_dirs or path is None:
         return False
@@ -1472,12 +1491,15 @@ def _skill_path_is_protected(path, protected_dirs: list[Path]) -> bool:
 def tool_result_redactor(hermes_home=None):
     """Return ``redact(tool_name, result, args=None)`` for browser-facing tool results, or None.
 
-    A ``skill_view`` result for a protected skill is replaced by its status only. An
-    unparseable result whose skill cannot be identified is withheld as well.
+    With ``hide_tool_results`` every result is replaced by its status. Otherwise only a
+    ``skill_view`` result for a protected skill is; an unparseable one whose skill cannot be
+    identified is withheld as well.
     """
-    from api.config import protected_skill_dirs
+    from api.config import protected_skill_dirs, tool_results_hidden
 
     cfg = _policy_config_for_profile(hermes_home)
+    if tool_results_hidden(cfg):
+        return lambda tool_name, result, args=None: _tool_result_status(result)
     protected_dirs = protected_skill_dirs(cfg)
     if not protected_dirs:
         return None

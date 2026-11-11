@@ -283,12 +283,14 @@ webui:
   disable_uploads: true
   protected_skill_dirs:
     - /opt/shared/skills/internal
+  hide_tool_results: true
 ```
 
 | Key | Variable | Effect |
 |---|---|---|
 | `disable_uploads` | `HERMES_WEBUI_DISABLE_UPLOADS` | Every upload endpoint (`/api/upload`, `/api/upload/extract`, `/api/workspace/upload`, `/api/transcribe`) answers 403 before reading the body. The attach, mic, voice-mode and workspace upload controls are hidden, and pasted or dropped files are ignored. Long pasted text stays in the composer. |
 | `protected_skill_dirs` | `HERMES_WEBUI_PROTECTED_SKILL_DIRS` (`os.pathsep`-separated) | Skills under these folders appear by name only. Their content and linked files cannot be opened, and they cannot be edited, deleted, toggled or shadowed by a new skill of the same name from WebUI. `/use <skill>` and slash commands still work: the agent loads the skill itself. When it does, the browser only sees the `skill_view` status (`{"success": true, "name": ..., "status": "succeeded"}`) in tool cards, session payloads, exports and content search; failures keep their error text. The agent still receives the full content. |
+| `hide_tool_results` | `HERMES_WEBUI_HIDE_TOOL_RESULTS` | Every tool call box shows only `{"success": ..., "status": "succeeded"}` or `"failed"` instead of the tool's output, live and in session payloads, exports, share links and content search. Arguments stay visible. The agent still receives the full result. |
 
 These are WebUI controls. `protected_skill_dirs` does not stop the agent from
 reading a skill with its own tools, and it does not make the files read-only;
