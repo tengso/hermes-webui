@@ -18281,7 +18281,8 @@ def handle_get(handler, parsed) -> bool:
         # (#7622). This page is server-rendered, so client-side browser
         # detection has not run yet — honour Accept-Language here too, or the
         # very first page a new install shows is still English for everyone.
-        _lang = _settings.get("language")
+        from api.config import default_language as _default_language
+        _lang = _settings.get("language") or _default_language()
         if _lang:
             _login_locale_key = _resolve_login_locale_key(_lang)
         else:
@@ -18730,6 +18731,9 @@ def handle_get(handler, parsed) -> bool:
         settings["uploads_disabled"] = _uploads_disabled()
         from api.config import hidden_settings_sections as _hidden_settings_sections
         settings["hidden_settings_sections"] = _hidden_settings_sections()
+        if not settings.get("language"):
+            from api.config import default_language as _default_language
+            settings["language"] = _default_language()
         # Auth-state fields for frontend safety badge / confirmation flows
         from api.auth import get_password_hash, is_auth_enabled
         settings["auth_enabled"] = is_auth_enabled()

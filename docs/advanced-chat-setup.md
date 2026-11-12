@@ -285,6 +285,7 @@ webui:
     - /opt/shared/skills/internal
   hide_tool_results: true
   hidden_settings_sections: [providers, plugins, extensions, system]
+  default_language: zh
 ```
 
 | Key | Variable | Effect |
@@ -293,6 +294,7 @@ webui:
 | `protected_skill_dirs` | `HERMES_WEBUI_PROTECTED_SKILL_DIRS` (`os.pathsep`-separated) | Skills under these folders appear by name only. Their content and linked files cannot be opened, and they cannot be edited, deleted, toggled or shadowed by a new skill of the same name from WebUI. `/use <skill>` and slash commands still work: the agent loads the skill itself. When it does, the browser only sees the `skill_view` status (`{"success": true, "name": ..., "status": "succeeded"}`) in tool cards, session payloads, exports and content search; failures keep their error text. The agent still receives the full content. |
 | `hide_tool_results` | `HERMES_WEBUI_HIDE_TOOL_RESULTS` | Every tool call box shows only `{"success": ..., "status": "succeeded"}` or `"failed"` instead of the tool's output, live and in session payloads, exports, share links and content search. Arguments stay visible. The agent still receives the full result. |
 | `hidden_settings_sections` | `HERMES_WEBUI_HIDDEN_SETTINGS_SECTIONS` (comma-separated) | Removes the listed Settings sections (any of `providers`, `plugins`, `extensions`, `system`) from the Settings menu and from settings search. The APIs behind them answer 403: `providers` covers `/api/providers*`; `plugins` covers `/api/plugins`; `extensions` covers the extension status, registry, install, uninstall, toggle and consent APIs (installed extensions still load); `system` covers `/api/mcp/*`, `/api/gateway/*`, `/api/updates/*` and `/api/shutdown`, and skips the update check. Hiding `system` also removes Sign out, password and passkey controls from the UI. |
+| `default_language` | `HERMES_WEBUI_DEFAULT_LANGUAGE` | UI language (for example `zh` for Simplified Chinese, `zh-Hant`, `en`) used until a language is saved in Settings → Preferences, including on the login page. It takes precedence over the browser's language. A language saved in Preferences applies to every user of the server and wins over this default. |
 
 These are WebUI controls. `protected_skill_dirs` does not stop the agent from
 reading a skill with its own tools, and it does not make the files read-only;

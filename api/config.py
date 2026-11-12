@@ -1345,6 +1345,19 @@ def tool_results_hidden(config_data: dict | None = None) -> bool:
     return _webui_policy_flag("HERMES_WEBUI_HIDE_TOOL_RESULTS", "hide_tool_results", config_data)
 
 
+def default_language(config_data: dict | None = None) -> str | None:
+    """``HERMES_WEBUI_DEFAULT_LANGUAGE`` / ``webui.default_language``.
+
+    UI language used while no language has been saved in Settings (e.g. ``zh``).
+    Values that are not language codes are ignored.
+    """
+    raw = _webui_policy_raw("HERMES_WEBUI_DEFAULT_LANGUAGE", "default_language", config_data)
+    if not isinstance(raw, str):
+        return None
+    lang = raw.strip()
+    return lang if _SETTINGS_LANG_RE.match(lang) else None
+
+
 HIDEABLE_SETTINGS_SECTIONS = ("providers", "plugins", "extensions", "system")
 
 
