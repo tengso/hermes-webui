@@ -18148,6 +18148,7 @@ _HIDDEN_SETTINGS_SECTION_PATHS = {
         "/api/updates/check", "/api/updates/apply", "/api/updates/force",
         "/api/updates/clear_lock", "/api/updates/summary", "/api/shutdown",
     }),
+    "logs": frozenset({"/api/logs"}),
 }
 _HIDDEN_SETTINGS_SECTION_PREFIXES = {"system": ("/api/mcp/servers/",)}
 

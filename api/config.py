@@ -1358,13 +1358,13 @@ def default_language(config_data: dict | None = None) -> str | None:
     return lang if _SETTINGS_LANG_RE.match(lang) else None
 
 
-HIDEABLE_SETTINGS_SECTIONS = ("providers", "plugins", "extensions", "system")
+HIDEABLE_SETTINGS_SECTIONS = ("providers", "plugins", "extensions", "system", "logs")
 
 
 def hidden_settings_sections(config_data: dict | None = None) -> list[str]:
     """``HERMES_WEBUI_HIDDEN_SETTINGS_SECTIONS`` (comma-separated) / ``webui.hidden_settings_sections``.
 
-    Settings sections removed from the Settings menu; the APIs behind them answer 403.
+    Settings sections (or the Logs page) removed from the UI; the APIs behind them answer 403.
     Only ``HIDEABLE_SETTINGS_SECTIONS`` are accepted; other names are ignored.
     """
     raw = _webui_policy_raw(

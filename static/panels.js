@@ -401,7 +401,8 @@ function _syncMobileSidebarPanelFromMainView(){
 }
 
 async function switchPanel(name, opts = {}) {
-  const nextPanel = name || 'chat';
+  let nextPanel = name || 'chat';
+  if (nextPanel === 'logs' && typeof _isSettingsSectionHidden === 'function' && _isSettingsSectionHidden('logs')) nextPanel = 'chat';
   const prevPanel = _currentPanel;
   // ── Desktop sidebar collapse toggle (rail-click only) ──
   // If the click came from a rail icon AND we're on desktop, the rail icon
@@ -4793,7 +4794,7 @@ async function loadLogs(animate) {
   const box = $('logsOutput');
   const status = $('logsStatus');
   const refreshBtn = $('logsRefreshBtn');
-  if (!box) return;
+  if (!box || _isSettingsSectionHidden('logs')) return;
   if (animate && refreshBtn) {
     refreshBtn.style.opacity = '0.5';
     refreshBtn.disabled = true;
@@ -8854,6 +8855,10 @@ function _applyHiddenSettingsSections(){
   document.querySelectorAll('#settingsMenu [data-settings-section]').forEach(btn=>{
     if(_isSettingsSectionHidden(btn.dataset.settingsSection)) btn.style.display='none';
   });
+  if(_isSettingsSectionHidden('logs')){
+    document.querySelectorAll('.nav-tab[data-panel="logs"]').forEach(el=>el.remove());
+    if(_currentPanel==='logs') switchPanel('chat');
+  }
 }
 
 function switchSettingsSection(name,opts){

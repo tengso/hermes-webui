@@ -629,10 +629,11 @@ class TestHiddenSettingsSections:
             ("patch", "/api/mcp/servers/windy"),
             ("get", "/api/gateway/status"), ("post", "/api/gateway/restart"),
             ("post", "/api/updates/apply"), ("post", "/api/shutdown"),
+            ("get", "/api/logs?file=agent"),
         ]
         for method, path in cases:
             handled, captured, armed = self._call(
-                method, path, monkeypatch, "providers, Plugins,extensions,system"
+                method, path, monkeypatch, "providers, Plugins,extensions,system,LOGS"
             )
             assert handled is True, path
             assert captured["status"] == 403, path
@@ -647,6 +648,7 @@ class TestHiddenSettingsSections:
             assert routes._refuse_hidden_settings_route(handler, urlparse("/api/mcp/tools")) is False
             assert routes._refuse_hidden_settings_route(handler, urlparse("/api/providers")) is False
             assert routes._refuse_hidden_settings_route(handler, urlparse("/api/settings")) is False
+            assert routes._refuse_hidden_settings_route(handler, urlparse("/api/logs")) is False
             assert routes._refuse_hidden_settings_route(handler, urlparse("/api/extensions/myext/proxy/x")) is False
             assert routes._refuse_hidden_settings_route(handler, urlparse("/api/plugins")) is True
         assert fake_j.call_count == 1
@@ -657,8 +659,8 @@ class TestHiddenSettingsSections:
         monkeypatch.setenv("HERMES_WEBUI_HIDDEN_SETTINGS_SECTIONS", "")
         assert hidden_settings_sections({}) == []
         assert hidden_settings_sections(
-            {"webui": {"hidden_settings_sections": ["system", "plugins", "appearance", None]}}
-        ) == ["plugins", "system"]
+            {"webui": {"hidden_settings_sections": ["logs", "system", "plugins", "appearance", None]}}
+        ) == ["plugins", "system", "logs"]
         monkeypatch.setenv("HERMES_WEBUI_HIDDEN_SETTINGS_SECTIONS", " Extensions , providers ")
         assert hidden_settings_sections(
             {"webui": {"hidden_settings_sections": ["system"]}}
@@ -711,6 +713,49 @@ console.log(JSON.stringify({
         assert result["loaded"] == []
         assert result["pluginsPaneActive"] is False
 
+    def test_hidden_logs_removes_nav_entries_and_redirects_to_chat(self):
+        import shutil
+        import subprocess
+        import pytest
+
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not on PATH")
+        js = read("static/panels.js")
+        start = js.index("function _isSettingsSectionHidden")
+        end = js.index("function switchSettingsSection")
+        switch_start = js.index("async function switchPanel")
+        switch_head_end = js.index("const prevPanel = _currentPanel;", switch_start)
+        script = """
+const nav = [];
+const mk = (panel) => { const el = {dataset:{panel}, remove(){ nav.splice(nav.indexOf(el), 1); }}; nav.push(el); return el; };
+['chat','logs','settings','chat','logs','settings'].forEach(mk);
+global.window = {_hiddenSettingsSections: ['logs']};
+global.document = {querySelectorAll: sel => {
+  if (sel === '.nav-tab[data-panel="logs"]') return nav.filter(el => el.dataset.panel === 'logs');
+  return [];
+}};
+let _currentPanel = 'logs';
+const switched = [];
+function switchPanel(name){ switched.push(name); }
+function resolveNext(name){
+""" + js[switch_start:switch_head_end].split(") {\n", 1)[1] + """
+  return nextPanel;
+}
+""" + js[start:end] + """
+_applyHiddenSettingsSections();
+console.log(JSON.stringify({
+  nav: nav.map(el => el.dataset.panel), switched,
+  logsTarget: resolveNext('logs'), skillsTarget: resolveNext('skills'),
+}));
+"""
+        out = subprocess.run([node, "-e", script], capture_output=True, text=True, check=True)
+        result = json.loads(out.stdout)
+        assert result["nav"] == ["chat", "settings", "chat", "settings"]
+        assert result["switched"] == ["chat"]
+        assert result["logsTarget"] == "chat"
+        assert result["skillsTarget"] == "skills"
+
     def test_hidden_section_loaders_do_not_fetch(self):
         js = read("static/panels.js")
         for fn, section in [
@@ -720,6 +765,7 @@ console.log(JSON.stringify({
             ("function loadMcpServers", "system"),
             ("function loadMcpTools", "system"),
             ("function loadGatewayStatus", "system"),
+            ("async function loadLogs", "logs"),
         ]:
             body = js[js.index(fn):]
             guard = body.index(f"_isSettingsSectionHidden('{section}')) return;")
