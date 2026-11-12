@@ -541,6 +541,7 @@ function runScenario(command) {
       };
       globalThis.esc = (value) => String(value || '');
       globalThis.loadProvidersPanel = async () => undefined;
+      globalThis._isSettingsSectionHidden = () => false;
       globalThis.loadPluginsPanel = async () => undefined;
       globalThis.loadExtensionsPanel = async () => undefined;
       globalThis._settingsIndex = null;

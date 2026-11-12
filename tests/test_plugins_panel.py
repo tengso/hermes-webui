@@ -595,3 +595,132 @@ class TestAutoHidePluginsTab:
         assert "section==='plugins'" in segment
         assert "display==='none'" in segment
         assert "section='conversation'" in segment
+
+
+class TestHiddenSettingsSections:
+    """webui.hidden_settings_sections removes Settings sections and refuses their APIs."""
+
+    def _call(self, method, path, monkeypatch, hidden):
+        import api.routes as routes
+        monkeypatch.setenv("HERMES_WEBUI_HIDDEN_SETTINGS_SECTIONS", hidden)
+        captured = {}
+
+        def fake_j(handler, payload, status=200, extra_headers=None):
+            captured.update(payload=payload, status=status)
+            return True
+
+        armed = []
+        handler = MagicMock()
+        with patch("api.routes.j", side_effect=fake_j), \
+             patch("api.routes._check_csrf", return_value=True), \
+             patch("api.routes.arm_connection_close_if_body_pending", side_effect=armed.append), \
+             patch("api.routes.read_body", side_effect=AssertionError("body read")), \
+             patch("api.routes._handle_plugins", side_effect=AssertionError("plugins served")):
+            handled = getattr(routes, f"handle_{method}")(handler, urlparse(path))
+        return handled, captured, armed
+
+    def test_each_hidden_section_refuses_its_apis_before_reading_the_body(self, monkeypatch):
+        cases = [
+            ("get", "/api/providers"), ("post", "/api/providers/self-hosted"),
+            ("get", "/api/plugins"),
+            ("get", "/api/extensions/status"), ("post", "/api/extensions/install"),
+            ("get", "/api/mcp/servers"), ("get", "/api/mcp/tools"),
+            ("put", "/api/mcp/servers/windy"), ("delete", "/api/mcp/servers/windy"),
+            ("patch", "/api/mcp/servers/windy"),
+            ("get", "/api/gateway/status"), ("post", "/api/gateway/restart"),
+            ("post", "/api/updates/apply"), ("post", "/api/shutdown"),
+        ]
+        for method, path in cases:
+            handled, captured, armed = self._call(
+                method, path, monkeypatch, "providers, Plugins,extensions,system"
+            )
+            assert handled is True, path
+            assert captured["status"] == 403, path
+            assert captured["payload"] == {"error": "This feature is disabled on this server"}, path
+            assert len(armed) == 1, path
+
+    def test_only_listed_sections_are_refused(self, monkeypatch):
+        import api.routes as routes
+        monkeypatch.setenv("HERMES_WEBUI_HIDDEN_SETTINGS_SECTIONS", "plugins")
+        handler = MagicMock()
+        with patch("api.routes.j", return_value=True) as fake_j:
+            assert routes._refuse_hidden_settings_route(handler, urlparse("/api/mcp/tools")) is False
+            assert routes._refuse_hidden_settings_route(handler, urlparse("/api/providers")) is False
+            assert routes._refuse_hidden_settings_route(handler, urlparse("/api/settings")) is False
+            assert routes._refuse_hidden_settings_route(handler, urlparse("/api/extensions/myext/proxy/x")) is False
+            assert routes._refuse_hidden_settings_route(handler, urlparse("/api/plugins")) is True
+        assert fake_j.call_count == 1
+
+    def test_hidden_settings_sections_env_wins_and_unknown_names_are_dropped(self, monkeypatch):
+        from api.config import hidden_settings_sections
+
+        monkeypatch.setenv("HERMES_WEBUI_HIDDEN_SETTINGS_SECTIONS", "")
+        assert hidden_settings_sections({}) == []
+        assert hidden_settings_sections(
+            {"webui": {"hidden_settings_sections": ["system", "plugins", "appearance", None]}}
+        ) == ["plugins", "system"]
+        monkeypatch.setenv("HERMES_WEBUI_HIDDEN_SETTINGS_SECTIONS", " Extensions , providers ")
+        assert hidden_settings_sections(
+            {"webui": {"hidden_settings_sections": ["system"]}}
+        ) == ["providers", "extensions"]
+
+    def test_settings_api_reports_hidden_sections(self):
+        src = read("api/routes.py")
+        assert 'settings["hidden_settings_sections"] = _hidden_settings_sections()' in src
+
+    def test_frontend_removes_hidden_entries_and_falls_back_to_conversation(self):
+        import shutil
+        import subprocess
+        import pytest
+
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not on PATH")
+        js = read("static/panels.js")
+        start = js.index("function _isSettingsSectionHidden")
+        end = js.index("function _normalizeSettingsSearchText")
+        script = """
+const buttons = ['conversation','providers','plugins','extensions','system','help'].map(s => ({dataset:{settingsSection:s}, style:{display:''}, classList:{toggle(){}}}));
+const panes = {};
+global.window = {_hiddenSettingsSections: ['providers','plugins','extensions','system']};
+global.document = {querySelectorAll: sel => buttons, querySelector: () => null};
+global._currentPanel = 'settings';
+global.$ = id => (panes[id] = panes[id] || {classList:{active:false, toggle(c, on){ this.active = on; }}});
+global.loaded = [];
+global.loadProvidersPanel = () => loaded.push('providers');
+global.loadPluginsPanel = () => loaded.push('plugins');
+global.loadExtensionsPanel = () => loaded.push('extensions');
+global._closeMobileSidebarAfterPanelSelection = () => {};
+let _settingsSection, _currentSettingsSection;
+""" + js[start:end] + """
+_applyHiddenSettingsSections();
+switchSettingsSection('plugins');
+const first = _currentSettingsSection;
+switchSettingsSection('help');
+console.log(JSON.stringify({
+  shown: buttons.filter(b => b.style.display !== 'none').map(b => b.dataset.settingsSection),
+  first, second: _currentSettingsSection, loaded,
+  pluginsPaneActive: panes.settingsPanePlugins.classList.active,
+}));
+"""
+        out = subprocess.run([node, "-e", script], capture_output=True, text=True, check=True)
+        result = json.loads(out.stdout)
+        assert result["shown"] == ["conversation", "help"]
+        assert result["first"] == "conversation"
+        assert result["second"] == "help"
+        assert result["loaded"] == []
+        assert result["pluginsPaneActive"] is False
+
+    def test_hidden_section_loaders_do_not_fetch(self):
+        js = read("static/panels.js")
+        for fn, section in [
+            ("async function loadProvidersPanel", "providers"),
+            ("async function loadPluginsPanel", "plugins"),
+            ("async function loadExtensionsPanel", "extensions"),
+            ("function loadMcpServers", "system"),
+            ("function loadMcpTools", "system"),
+            ("function loadGatewayStatus", "system"),
+        ]:
+            body = js[js.index(fn):]
+            guard = body.index(f"_isSettingsSectionHidden('{section}')) return;")
+            assert guard < body.index("api("), fn

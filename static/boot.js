@@ -4102,6 +4102,8 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
     if(typeof checkWebUIVersionSkew==='function'){try{checkWebUIVersionSkew(s);}catch(_){}}
     window._sendKey=s.send_key||'enter';
     window._uploadsDisabled=s.uploads_disabled===true;
+    window._hiddenSettingsSections=Array.isArray(s.hidden_settings_sections)?s.hidden_settings_sections:[];
+    if(typeof _applyHiddenSettingsSections==='function') _applyHiddenSettingsSections();
     // Persist default workspace so the blank new-chat page can show it
     // and workspace actions (New file/folder) work before the first session (#804).
     if(s.default_workspace) S._profileDefaultWorkspace=s.default_workspace;
@@ -4347,7 +4349,8 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
   // Non-blocking update check (fire-and-forget, once per tab session)
   // ?test_updates=1 in URL forces banner display for testing (bypasses sessionStorage guards)
   const _testUpdates=new URLSearchParams(location.search).get('test_updates')==='1';
-  if(_testUpdates||(_bootSettings.check_for_updates!==false&&!sessionStorage.getItem('hermes-update-checked')&&!sessionStorage.getItem('hermes-update-dismissed'))){
+  const _updatesHidden=Array.isArray(window._hiddenSettingsSections)&&window._hiddenSettingsSections.includes('system');
+  if(!_updatesHidden&&(_testUpdates||(_bootSettings.check_for_updates!==false&&!sessionStorage.getItem('hermes-update-checked')&&!sessionStorage.getItem('hermes-update-dismissed')))){
     const _checkUrl='api/updates/check'+(_testUpdates?'?simulate=1':'');
     const _recoveryGenerationAtCheck=Number(window._updateRecoveryGeneration)||0;
     api(_checkUrl,{method:_testUpdates?'GET':'POST',body:_testUpdates?undefined:JSON.stringify({force:false}),timeoutMs:300000}).then(d=>{if(!_testUpdates)sessionStorage.setItem('hermes-update-checked','1');if((d.webui&&d.webui.behind>0)||(d.agent&&d.agent.behind>0))_showUpdateBanner(d,_recoveryGenerationAtCheck);}).catch(()=>{});

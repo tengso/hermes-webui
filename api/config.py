@@ -1345,6 +1345,28 @@ def tool_results_hidden(config_data: dict | None = None) -> bool:
     return _webui_policy_flag("HERMES_WEBUI_HIDE_TOOL_RESULTS", "hide_tool_results", config_data)
 
 
+HIDEABLE_SETTINGS_SECTIONS = ("providers", "plugins", "extensions", "system")
+
+
+def hidden_settings_sections(config_data: dict | None = None) -> list[str]:
+    """``HERMES_WEBUI_HIDDEN_SETTINGS_SECTIONS`` (comma-separated) / ``webui.hidden_settings_sections``.
+
+    Settings sections removed from the Settings menu; the APIs behind them answer 403.
+    Only ``HIDEABLE_SETTINGS_SECTIONS`` are accepted; other names are ignored.
+    """
+    raw = _webui_policy_raw(
+        "HERMES_WEBUI_HIDDEN_SETTINGS_SECTIONS", "hidden_settings_sections", config_data
+    )
+    if isinstance(raw, str):
+        items = raw.split(",")
+    elif isinstance(raw, (list, tuple)):
+        items = [str(item) for item in raw if item is not None]
+    else:
+        items = []
+    wanted = {item.strip().lower() for item in items}
+    return [name for name in HIDEABLE_SETTINGS_SECTIONS if name in wanted]
+
+
 def protected_skill_dirs(config_data: dict | None = None) -> list[Path]:
     """``HERMES_WEBUI_PROTECTED_SKILL_DIRS`` (os.pathsep-separated) / ``webui.protected_skill_dirs``.
 

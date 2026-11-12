@@ -18131,8 +18131,52 @@ def _handle_session_get(handler, parsed) -> bool:
         return j(handler, {"session": public_session_projection(sess)})
 
 
+# APIs behind each section webui.hidden_settings_sections can hide.
+_HIDDEN_SETTINGS_SECTION_PATHS = {
+    "providers": frozenset({
+        "/api/providers", "/api/providers/delete", "/api/providers/self-hosted",
+    }),
+    "plugins": frozenset({"/api/plugins"}),
+    "extensions": frozenset({
+        "/api/extensions/status", "/api/extensions/registry", "/api/extensions/toggle",
+        "/api/extensions/sidecar-proxy-consent", "/api/extensions/install",
+        "/api/extensions/uninstall",
+    }),
+    "system": frozenset({
+        "/api/mcp/servers", "/api/mcp/tools",
+        "/api/gateway/status", "/api/gateway/start", "/api/gateway/stop", "/api/gateway/restart",
+        "/api/updates/check", "/api/updates/apply", "/api/updates/force",
+        "/api/updates/clear_lock", "/api/updates/summary", "/api/shutdown",
+    }),
+}
+_HIDDEN_SETTINGS_SECTION_PREFIXES = {"system": ("/api/mcp/servers/",)}
+
+
+def _hidden_settings_section_for_path(path: str) -> str | None:
+    for section, paths in _HIDDEN_SETTINGS_SECTION_PATHS.items():
+        if path in paths or path.startswith(_HIDDEN_SETTINGS_SECTION_PREFIXES.get(section, ())):
+            return section
+    return None
+
+
+def _refuse_hidden_settings_route(handler, parsed) -> bool:
+    """Answer 403 (before reading any body) when the route belongs to a hidden settings section."""
+    section = _hidden_settings_section_for_path(parsed.path)
+    if section is None:
+        return False
+    from api.config import hidden_settings_sections
+
+    if section not in hidden_settings_sections():
+        return False
+    arm_connection_close_if_body_pending(handler)
+    j(handler, {"error": "This feature is disabled on this server"}, status=403)
+    return True
+
+
 def handle_get(handler, parsed) -> bool:
     """Handle all GET routes. Returns True if handled, False for 404."""
+    if _refuse_hidden_settings_route(handler, parsed):
+        return True
     proxy_result = _handle_extension_sidecar_proxy(handler, parsed, "GET")
     if proxy_result is not False:
         return proxy_result
@@ -18684,6 +18728,8 @@ def handle_get(handler, parsed) -> bool:
         )
         from api.config import uploads_disabled as _uploads_disabled
         settings["uploads_disabled"] = _uploads_disabled()
+        from api.config import hidden_settings_sections as _hidden_settings_sections
+        settings["hidden_settings_sections"] = _hidden_settings_sections()
         # Auth-state fields for frontend safety badge / confirmation flows
         from api.auth import get_password_hash, is_auth_enabled
         settings["auth_enabled"] = is_auth_enabled()
@@ -19948,6 +19994,10 @@ def handle_post(handler, parsed) -> bool:
         finally:
             if diag:
                 diag.finish()
+    if _refuse_hidden_settings_route(handler, parsed):
+        if diag:
+            diag.finish()
+        return True
     proxy_result = _handle_extension_sidecar_proxy(
         handler,
         parsed,
@@ -23954,6 +24004,8 @@ def handle_patch(handler, parsed) -> bool:
     """Handle all PATCH routes. Returns True if handled, False for 404."""
     if not _check_csrf(handler):
         return j(handler, {"error": _csrf_rejection_error(handler)}, status=403)
+    if _refuse_hidden_settings_route(handler, parsed):
+        return True
     proxy_result = _handle_extension_sidecar_proxy(
         handler,
         parsed,
@@ -23988,6 +24040,8 @@ def handle_delete(handler, parsed) -> bool:
     """Handle all DELETE routes. Returns True if handled, False for 404."""
     if not _check_csrf(handler):
         return j(handler, {"error": _csrf_rejection_error(handler)}, status=403)
+    if _refuse_hidden_settings_route(handler, parsed):
+        return True
     proxy_result = _handle_extension_sidecar_proxy(
         handler,
         parsed,
@@ -24030,6 +24084,8 @@ def handle_put(handler, parsed) -> bool:
     """Handle all PUT routes. Returns True if handled, False for 404."""
     if not _check_csrf(handler):
         return j(handler, {"error": "Cross-origin request rejected"}, status=403)
+    if _refuse_hidden_settings_route(handler, parsed):
+        return True
     proxy_result = _handle_extension_sidecar_proxy(
         handler,
         parsed,
