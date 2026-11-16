@@ -7,7 +7,7 @@ import re as _re
 import tempfile
 from pathlib import Path
 
-from api.config import MAX_UPLOAD_BYTES, STATE_DIR
+from api.config import MAX_UPLOAD_BYTES, STATE_DIR, uploads_disabled
 from api.helpers import (
     arm_connection_close_if_body_pending,
     j,
@@ -115,6 +115,8 @@ def _read_multipart_or_reject(handler):
       and left every byte of it on the socket. There is no honest length to
       drain, so the request is refused before ``rfile`` is touched.
     """
+    if uploads_disabled():
+        raise _RejectBeforeRead('File uploads are disabled on this server', 403)
     content_type = handler.headers.get('Content-Type', '')
     coding = unsupported_transfer_encoding(handler)
     if coding is not None:
@@ -766,6 +768,8 @@ def _stt_provider_capability():
 
 
 def handle_transcribe_capability(handler):
+    if uploads_disabled():
+        return j(handler, {"ok": True, "available": False, "provider": "none", "uploads_disabled": True})
     available, provider = _stt_provider_capability()
     return j(handler, {"ok": True, "available": bool(available), "provider": provider})
 

@@ -401,7 +401,8 @@ function _syncMobileSidebarPanelFromMainView(){
 }
 
 async function switchPanel(name, opts = {}) {
-  const nextPanel = name || 'chat';
+  let nextPanel = name || 'chat';
+  if (nextPanel === 'logs' && typeof _isSettingsSectionHidden === 'function' && _isSettingsSectionHidden('logs')) nextPanel = 'chat';
   const prevPanel = _currentPanel;
   // ── Desktop sidebar collapse toggle (rail-click only) ──
   // If the click came from a rail icon AND we're on desktop, the rail icon
@@ -4793,7 +4794,7 @@ async function loadLogs(animate) {
   const box = $('logsOutput');
   const status = $('logsStatus');
   const refreshBtn = $('logsRefreshBtn');
-  if (!box) return;
+  if (!box || _isSettingsSectionHidden('logs')) return;
   if (animate && refreshBtn) {
     refreshBtn.style.opacity = '0.5';
     refreshBtn.disabled = true;
@@ -5535,6 +5536,15 @@ function renderSkills(skills) {
       const el = document.createElement('div');
       el.className = 'skill-item' + (skill.disabled ? ' disabled' : '');
       el.style.display = collapsed ? 'none' : '';
+      if (skill.protected) {
+        el.classList.add('protected');
+        const nameOnly = document.createElement('span');
+        nameOnly.className = 'skill-name';
+        nameOnly.textContent = skill.name;
+        el.append(nameOnly);
+        sec.appendChild(el);
+        continue;
+      }
       const isDisabled = skill.disabled || false;
       const toggle = document.createElement('span');
       toggle.className = 'skill-toggle' + (isDisabled ? '' : ' enabled');
@@ -8297,7 +8307,7 @@ const wrap=$('composerWrap');let dragCounter=0;
 document.addEventListener('dragover',e=>e.preventDefault());
 document.addEventListener('dragenter',e=>{e.preventDefault();
   const isWsPath=e.dataTransfer.types.includes('application/ws-path');
-  const isFiles=e.dataTransfer.types.includes('Files');
+  const isFiles=window._uploadsDisabled!==true&&e.dataTransfer.types.includes('Files');
   if(isFiles||isWsPath){
     dragCounter++;
     // Context-aware hint: a workspace-file drag inserts an @path reference;
@@ -8837,6 +8847,20 @@ function _renderComposerSituationalControlChips(){
   });
 }
 
+function _isSettingsSectionHidden(name){
+  return Array.isArray(window._hiddenSettingsSections)&&window._hiddenSettingsSections.includes(name);
+}
+
+function _applyHiddenSettingsSections(){
+  document.querySelectorAll('#settingsMenu [data-settings-section]').forEach(btn=>{
+    if(_isSettingsSectionHidden(btn.dataset.settingsSection)) btn.style.display='none';
+  });
+  if(_isSettingsSectionHidden('logs')){
+    document.querySelectorAll('.nav-tab[data-panel="logs"]').forEach(el=>el.remove());
+    if(_currentPanel==='logs') switchPanel('chat');
+  }
+}
+
 function switchSettingsSection(name,opts){
   // If the main content is not showing settings, just remember the section
   // without force-switching the panel. The section will be applied when the
@@ -8856,6 +8880,7 @@ function switchSettingsSection(name,opts){
     const pluginsTabBtn=document.querySelector('[data-settings-section="plugins"]');
     if(pluginsTabBtn && pluginsTabBtn.style.display==='none') section='conversation';
   }
+  if(_isSettingsSectionHidden(section)) section='conversation';
   _settingsSection=section;
   _currentSettingsSection=section;
   const map={conversation:'Conversation',appearance:'Appearance',preferences:'Preferences',providers:'Providers',plugins:'Plugins',extensions:'Extensions',system:'System',help:'Help'};
@@ -8967,6 +8992,7 @@ function _collectSettingsIndex(includeDynamic = true) {
   };
   for (const [paneId, sectionKey] of Object.entries(sectionMap)) {
     if (!includeDynamic && ['providers', 'plugins', 'extensions'].includes(sectionKey)) continue;
+    if (_isSettingsSectionHidden(sectionKey)) continue;
     const pane = $(paneId);
     if (!pane) continue;
     pane.querySelectorAll('.settings-field').forEach(field => {
@@ -11421,7 +11447,7 @@ function handleExtensionStorageClear(btn){
 async function loadExtensionsPanel(opts){
   const target=$('extensionsDiagnostics');
   const copyBtn=$('extensionsCopyDiagnosticsBtn');
-  if(!target) return;
+  if(!target||_isSettingsSectionHidden('extensions')) return;
   // Only preserve REAL rendered diagnostics across a refresh — never the
   // "Loading…" / error placeholders, or a failed refresh would leave the panel
   // stuck on "Loading extension diagnostics…" instead of rendering the error.
@@ -11834,7 +11860,7 @@ function _partitionPluginsActiveFirst(plugins){
 async function loadPluginsPanel(){
   const list=$('pluginsList');
   const empty=$('pluginsEmpty');
-  if(!list) return;
+  if(!list||_isSettingsSectionHidden('plugins')) return;
   try{
     const data=await api('/api/plugins');
     const plugins=Array.isArray((data||{}).plugins)?data.plugins:[];
@@ -12015,7 +12041,7 @@ async function _fetchProviderQuotaStatus(force=false){
 async function loadProvidersPanel(){
   const list=$('providersList');
   const empty=$('providersEmpty');
-  if(!list) return;
+  if(!list||_isSettingsSectionHidden('providers')) return;
   try{
     const data=await api('/api/providers');
     const quota=await _fetchProviderQuotaStatus(false).catch(e=>({ok:false,status:'unavailable',quota:null,message:e.message||t('provider_quota_unavailable'),client_fetched_at:new Date().toISOString()}));
@@ -14377,7 +14403,7 @@ function _refreshMcpToolsetsCatalog(payload){
 }
 function loadMcpServers(){
   const list=$('mcpServerList');
-  if(!list) return;
+  if(!list||_isSettingsSectionHidden('system')) return;
   list.innerHTML=`<div style="color:var(--muted);font-size:12px;padding:6px 0">${esc(t('loading'))}</div>`;
   api('/api/mcp/servers').then(r=>{
     if(!r||!Array.isArray(r.servers)) return;
@@ -14534,7 +14560,7 @@ function loadMcpTools(){
   const list=$('mcpToolList');
   const toolbar=$('mcpToolToolbar');
   const pager=$('mcpToolPager');
-  if(!list) return;
+  if(!list||_isSettingsSectionHidden('system')) return;
   if(toolbar) toolbar.textContent='';
   if(pager) pager.innerHTML='';
   list.innerHTML=`<div style="color:var(--muted);font-size:12px;padding:6px 0">${esc(t('loading'))}</div>`;
@@ -14630,7 +14656,7 @@ function _renderGatewayStatus(r){
 }
 function loadGatewayStatus(){
   const card=$('gatewayStatusCard');
-  if(!card) return;
+  if(!card||_isSettingsSectionHidden('system')) return;
   return api('/api/gateway/status').then(r=>_renderGatewayStatus(r)).catch(()=>{card.innerHTML=`<div style="color:#ef4444;font-size:12px">${esc(t('gateway_status_load_failed'))}</div>`});
 }
 async function _gatewayAction(action){

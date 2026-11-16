@@ -301,3 +301,50 @@ def test_handle_transcribe_capability_reports_named_command_provider(monkeypatch
 
     assert available is True
     assert provider == "elevenlabs-gemini"
+
+
+@pytest.mark.parametrize(
+    "handler_name",
+    ["handle_upload", "handle_upload_extract", "handle_workspace_upload", "handle_transcribe"],
+)
+def test_disable_uploads_rejects_every_multipart_endpoint_before_reading(monkeypatch, handler_name):
+    monkeypatch.setenv("HERMES_WEBUI_DISABLE_UPLOADS", "1")
+    body, content_type = _multipart_body(
+        fields={"session_id": "s1"},
+        files={"file": ("doc.txt", b"secret document", "text/plain")},
+    )
+    handler = _FakeHandler(body, content_type)
+
+    getattr(upload, handler_name)(handler)
+
+    assert handler.status == 403
+    assert handler.payload()["error"] == "File uploads are disabled on this server"
+    assert handler.rfile.tell() == 0
+    assert getattr(handler, "close_connection", False) is True
+
+
+def test_disable_uploads_reports_transcription_unavailable(monkeypatch):
+    monkeypatch.setenv("HERMES_WEBUI_DISABLE_UPLOADS", "true")
+    monkeypatch.setattr(upload, "_stt_provider_capability", lambda: (True, "openai"))
+    handler = _FakeHandler(b"", "application/json")
+
+    handle_transcribe_capability(handler)
+
+    assert handler.payload()["available"] is False
+
+
+@pytest.mark.parametrize(
+    "env_value, config_data, expected",
+    [
+        ("", {}, False),
+        ("", {"webui": {"disable_uploads": True}}, True),
+        ("", {"webui": {"disable_uploads": "yes"}}, True),
+        ("0", {"webui": {"disable_uploads": True}}, False),
+        ("on", {"webui": {"disable_uploads": False}}, True),
+    ],
+)
+def test_uploads_disabled_env_wins_over_config(monkeypatch, env_value, config_data, expected):
+    from api.config import uploads_disabled
+
+    monkeypatch.setenv("HERMES_WEBUI_DISABLE_UPLOADS", env_value)
+    assert uploads_disabled(config_data) is expected

@@ -655,3 +655,71 @@ def test_fix_credential_permissions_skips_correct_files(tmp_path, monkeypatch):
     assert env_file.exists(), ".env missing after strict-permission check"
     if os.name != "nt":
         assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
+
+
+def _hide_tool_results_session():
+    call = {"id": "t1", "type": "function",
+            "function": {"name": "mcp_qmd_query", "arguments": json.dumps({"q": "rates"})}}
+    return {
+        "session_id": "hide1",
+        "messages": [
+            {"role": "assistant", "content": "", "tool_calls": [call],
+             "_anchor_activity_scene": {"activity_rows": [{
+                 "role": "tool",
+                 "tool": {"name": "mcp_qmd_query", "snippet": "internal rows 42", "preview": "internal rows 42"},
+                 "payload": {"name": "mcp_qmd_query", "snippet": "internal rows 42"},
+             }]}},
+            {"role": "tool", "tool_call_id": "t1", "content": json.dumps({"result": "internal rows 42"})},
+            {"role": "tool", "tool_call_id": "t2", "content": json.dumps({"success": False, "error": "db down"})},
+            {"role": "assistant", "content": "Rates are 42."},
+        ],
+        "tool_calls": [{"name": "mcp_qmd_query", "tid": "t1", "snippet": "internal rows 42", "args": {"q": "rates"}}],
+    }
+
+
+def test_hide_tool_results_leaves_only_status_in_public_session(monkeypatch, tmp_path):
+    from api import helpers
+
+    monkeypatch.setenv("HERMES_WEBUI_HIDE_TOOL_RESULTS", "1")
+    monkeypatch.setattr(helpers, "_session_profile_home", lambda _s: tmp_path)
+    session = _hide_tool_results_session()
+
+    public = helpers.redact_session_data(session)
+
+    assert "internal rows" not in json.dumps(public)
+    assert "db down" not in json.dumps(public)
+    assert json.loads(public["messages"][1]["content"]) == {"success": True, "status": "succeeded"}
+    assert json.loads(public["messages"][2]["content"]) == {"success": False, "status": "failed"}
+    assert public["messages"][3]["content"] == "Rates are 42."
+    assert public["tool_calls"][0]["args"] == {"q": "rates"}
+    assert "internal rows 42" in session["messages"][1]["content"]
+
+
+def test_tool_results_stay_visible_without_the_policy(monkeypatch, tmp_path):
+    from api import helpers
+
+    monkeypatch.delenv("HERMES_WEBUI_HIDE_TOOL_RESULTS", raising=False)
+    monkeypatch.delenv("HERMES_WEBUI_PROTECTED_SKILL_DIRS", raising=False)
+    monkeypatch.setattr(helpers, "_session_profile_home", lambda _s: tmp_path)
+
+    public = helpers.redact_session_data(_hide_tool_results_session())
+
+    assert "internal rows 42" in public["messages"][1]["content"]
+    assert public["tool_calls"][0]["snippet"] == "internal rows 42"
+
+
+def test_hide_tool_results_applies_to_live_tool_events(monkeypatch, tmp_path):
+    from api.gateway_chat import _gateway_tool_progress_event
+    from api.streaming import _withhold_tool_result
+
+    monkeypatch.setenv("HERMES_WEBUI_HIDE_TOOL_RESULTS", "true")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+
+    assert json.loads(_withhold_tool_result("terminal", {"command": "ls"}, json.dumps({"output": "a b", "exit_code": 2}))) == {
+        "success": False, "status": "failed",
+    }
+    _event, payload = _gateway_tool_progress_event(
+        {"event": "tool.completed", "tool": "read_file", "preview": "secret text", "args": {"path": "x"}}
+    )
+    assert "secret text" not in json.dumps(payload)
+    assert payload["args"] == {"path": "x"}

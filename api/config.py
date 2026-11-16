@@ -1313,6 +1313,100 @@ def verify_hermes_imports() -> tuple:
 MAX_FILE_BYTES = 400_000
 MAX_UPLOAD_BYTES = _env_mb_bytes("HERMES_WEBUI_MAX_UPLOAD_MB", 20)
 
+
+# ── Deployment policy (env var wins over config.yaml ``webui:``) ─────────────
+def _webui_policy_raw(env_name: str, key: str, config_data: dict | None = None):
+    env_value = os.getenv(env_name, "")
+    if env_value.strip():
+        return env_value
+    if config_data is None:
+        try:
+            config_data = get_config()
+        except Exception:
+            config_data = {}
+    webui_cfg = config_data.get("webui") if isinstance(config_data, dict) else None
+    return webui_cfg.get(key) if isinstance(webui_cfg, dict) else None
+
+
+def _webui_policy_flag(env_name: str, key: str, config_data: dict | None = None) -> bool:
+    raw = _webui_policy_raw(env_name, key, config_data)
+    if isinstance(raw, bool):
+        return raw
+    return str(raw or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def uploads_disabled(config_data: dict | None = None) -> bool:
+    """``HERMES_WEBUI_DISABLE_UPLOADS`` / ``webui.disable_uploads``: refuse every file upload."""
+    return _webui_policy_flag("HERMES_WEBUI_DISABLE_UPLOADS", "disable_uploads", config_data)
+
+
+def tool_results_hidden(config_data: dict | None = None) -> bool:
+    """``HERMES_WEBUI_HIDE_TOOL_RESULTS`` / ``webui.hide_tool_results``: browser sees tool status only."""
+    return _webui_policy_flag("HERMES_WEBUI_HIDE_TOOL_RESULTS", "hide_tool_results", config_data)
+
+
+def default_language(config_data: dict | None = None) -> str | None:
+    """``HERMES_WEBUI_DEFAULT_LANGUAGE`` / ``webui.default_language``.
+
+    UI language used while no language has been saved in Settings (e.g. ``zh``).
+    Values that are not language codes are ignored.
+    """
+    raw = _webui_policy_raw("HERMES_WEBUI_DEFAULT_LANGUAGE", "default_language", config_data)
+    if not isinstance(raw, str):
+        return None
+    lang = raw.strip()
+    return lang if _SETTINGS_LANG_RE.match(lang) else None
+
+
+HIDEABLE_SETTINGS_SECTIONS = ("providers", "plugins", "extensions", "system", "logs")
+
+
+def hidden_settings_sections(config_data: dict | None = None) -> list[str]:
+    """``HERMES_WEBUI_HIDDEN_SETTINGS_SECTIONS`` (comma-separated) / ``webui.hidden_settings_sections``.
+
+    Settings sections (or the Logs page) removed from the UI; the APIs behind them answer 403.
+    Only ``HIDEABLE_SETTINGS_SECTIONS`` are accepted; other names are ignored.
+    """
+    raw = _webui_policy_raw(
+        "HERMES_WEBUI_HIDDEN_SETTINGS_SECTIONS", "hidden_settings_sections", config_data
+    )
+    if isinstance(raw, str):
+        items = raw.split(",")
+    elif isinstance(raw, (list, tuple)):
+        items = [str(item) for item in raw if item is not None]
+    else:
+        items = []
+    wanted = {item.strip().lower() for item in items}
+    return [name for name in HIDEABLE_SETTINGS_SECTIONS if name in wanted]
+
+
+def protected_skill_dirs(config_data: dict | None = None) -> list[Path]:
+    """``HERMES_WEBUI_PROTECTED_SKILL_DIRS`` (os.pathsep-separated) / ``webui.protected_skill_dirs``.
+
+    Skills under these folders are listed by name only; their content cannot be
+    viewed, edited, deleted or toggled through WebUI.
+    """
+    raw = _webui_policy_raw(
+        "HERMES_WEBUI_PROTECTED_SKILL_DIRS", "protected_skill_dirs", config_data
+    )
+    if isinstance(raw, str):
+        items = raw.split(os.pathsep)
+    elif isinstance(raw, (list, tuple)):
+        items = [str(item) for item in raw if item is not None]
+    else:
+        items = []
+    dirs: list[Path] = []
+    for item in items:
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            dirs.append(Path(item).expanduser().resolve())
+        except (OSError, RuntimeError):
+            dirs.append(Path(item).expanduser().absolute())
+    return dirs
+
+
 # ── File type maps ───────────────────────────────────────────────────────────
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp"}
 MD_EXTS = {".md", ".markdown", ".mdown"}
