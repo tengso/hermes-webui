@@ -426,3 +426,58 @@ def test_load_locale_first_visit_uses_browser_hint_when_no_preference():
         navigator_obj={"languages": ["zh-CN"], "language": "zh-CN"},
     )
     assert out["saved"] == "fr"
+
+
+def _get_with_settings(path, stored, monkeypatch, default_lang):
+    from unittest.mock import MagicMock, patch
+    from urllib.parse import urlparse
+    import api.routes as routes
+
+    monkeypatch.setenv("HERMES_WEBUI_DEFAULT_LANGUAGE", default_lang)
+    captured = {}
+
+    def fake_j(handler, payload, status=200, extra_headers=None):
+        captured.update(payload=payload, status=status)
+        return True
+
+    def fake_t(handler, body, status=200, content_type=None):
+        captured.update(body=body, status=status)
+        return True
+
+    handler = MagicMock()
+    handler.headers = {"Accept-Language": "fr-FR"}
+    with patch("api.routes.load_settings", return_value=dict(stored)), \
+         patch("api.routes.j", side_effect=fake_j), \
+         patch("api.routes.t", side_effect=fake_t):
+        assert routes.handle_get(handler, urlparse(path)) is True
+    return captured
+
+
+def test_default_language_policy_env_wins_and_rejects_non_codes(monkeypatch):
+    from api.config import default_language
+
+    monkeypatch.setenv("HERMES_WEBUI_DEFAULT_LANGUAGE", "")
+    assert default_language({}) is None
+    assert default_language({"webui": {"default_language": " zh "}}) == "zh"
+    assert default_language({"webui": {"default_language": "not a lang!"}}) is None
+    assert default_language({"webui": {"default_language": 7}}) is None
+    monkeypatch.setenv("HERMES_WEBUI_DEFAULT_LANGUAGE", "zh-Hant")
+    assert default_language({"webui": {"default_language": "zh"}}) == "zh-Hant"
+
+
+def test_settings_api_reports_default_language_only_while_none_is_saved(monkeypatch):
+    captured = _get_with_settings("/api/settings", {"language": None}, monkeypatch, "zh")
+    assert captured["status"] == 200
+    assert captured["payload"]["language"] == "zh"
+
+    captured = _get_with_settings("/api/settings", {"language": "en"}, monkeypatch, "zh")
+    assert captured["payload"]["language"] == "en"
+
+    captured = _get_with_settings("/api/settings", {"language": None}, monkeypatch, "")
+    assert captured["payload"]["language"] is None
+
+
+def test_login_page_uses_default_language_over_accept_language(monkeypatch):
+    assert 'lang="zh-CN"' in _get_with_settings("/login", {"language": None}, monkeypatch, "zh")["body"]
+    assert 'lang="fr-FR"' in _get_with_settings("/login", {"language": None}, monkeypatch, "")["body"]
+    assert 'lang="ja-JP"' in _get_with_settings("/login", {"language": "ja"}, monkeypatch, "zh")["body"]

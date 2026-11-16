@@ -789,10 +789,17 @@ def _gateway_tool_progress_event(payload: dict) -> tuple[str, dict] | None:
     status = str(payload.get("status") or "running").strip().lower()
     tid = payload.get("toolCallId") or payload.get("tool_call_id") or payload.get("id")
     is_complete = event_type == "tool.completed" or status in {"completed", "complete", "success", "error", "failed"}
+    preview = payload.get("label") or payload.get("preview")
+    if is_complete:
+        from api.streaming import _withhold_tool_result
+
+        preview = _withhold_tool_result(
+            name, payload.get("args") if isinstance(payload.get("args"), dict) else {}, preview
+        )
     event_payload = {
         "event_type": "tool.completed" if is_complete else "tool.started",
         "name": name,
-        "preview": payload.get("label") or payload.get("preview"),
+        "preview": preview,
         "args": bound_run_journal_snapshot_args(payload.get("args"))
         if isinstance(payload.get("args"), dict)
         else {},

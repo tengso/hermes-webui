@@ -127,3 +127,48 @@ def test_directive_only_consumed_by_matching_session():
         "send() must not clear a newer pending directive created while awaiting"
     assert "[FORCED SKILL CONTEXT: ${_forcedSkillName}]" in src, \
         "send() must prepend deterministic forced-skill content before the user message"
+
+
+def _extract_js_function(source_text, function_name):
+    start = source_text.index(f"async function {function_name}(")
+    depth = 0
+    for index in range(source_text.index("{", start), len(source_text)):
+        if source_text[index] == "{":
+            depth += 1
+        elif source_text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source_text[start : index + 1]
+    raise AssertionError(f"Could not extract {function_name}")
+
+
+def test_use_on_protected_skill_skips_content_fetch_node():
+    import json
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        return
+    js = "\n".join([
+        "const calls = [];",
+        "global.S = { session: { session_id: 'sid' }, messages: [] };",
+        "global._forcedSkillDirectivePending = null;",
+        "global.renderMessages = () => {};",
+        "global.showToast = () => {};",
+        "global.api = async (url) => { calls.push(url);",
+        "  if (url === '/api/skills') return { skills: [{ name: 'secret', protected: true }] };",
+        "  throw new Error('unexpected ' + url); };",
+        _extract_js_function(read("static/commands.js"), "cmdUse"),
+        "(async () => {",
+        "  await cmdUse('secret');",
+        "  const payload = await _forcedSkillDirectivePending.promise;",
+        "  console.log(JSON.stringify({ calls, payload }));",
+        "})().catch(e => { console.error(e); process.exit(1); });",
+    ])
+    out = subprocess.run([node, "-e", js], capture_output=True, text=True, check=True)
+    result = json.loads(out.stdout)
+    assert result["calls"] == ["/api/skills"]
+    assert result["payload"]["name"] == "secret"
+    assert result["payload"]["content"] == ""
+    assert "skill_view" in result["payload"]["directive"]
